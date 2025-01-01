@@ -1,0 +1,156 @@
+import React, { useState } from 'react';
+
+const AttendeeForm = ({ eventName }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    mobile: '',
+    location: '',
+    email: '',
+    profession: '',
+    photo: null,
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    // Send formData to the backend for processing
+    const response = await fetch('/api/generate-pass', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...formData, eventName }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      alert('Pass generated and sent!');
+    } else {
+      alert('Something went wrong. Please try again.');
+    }
+  };
+
+  return (
+    <div className="attendee-form">
+      <h1>Register for {eventName}</h1>
+      <form onSubmit={handleSubmit}>
+        <input
+          type="text"
+          placeholder="Full Name"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
+        <input
+          type="tel"
+          placeholder="Mobile Number"
+          value={formData.mobile}
+          onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
+          required
+        />
+        <input
+          type="text"
+          placeholder="Location"
+          value={formData.location}
+          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+          required
+        />
+        <input
+          type="email"
+          placeholder="Email ID"
+          value={formData.email}
+          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          required
+        />
+        <input
+          type="text"
+          placeholder="Profession"
+          value={formData.profession}
+          onChange={(e) => setFormData({ ...formData, profession: e.target.value })}
+          required
+        />
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setFormData({ ...formData, photo: e.target.files[0] })}
+          required
+        />
+        <button type="submit">Generate Pass</button>
+
+      </form>
+    </div>
+  );
+};
+
+export default AttendeeForm;
+
+const express = require('express');
+const nodemailer = require('nodemailer');
+const Twilio = require('twilio');
+const { generatePass } = require('./utils/pdfGenerator');
+
+const router = express.Router();
+
+router.post('/generate-pass', async (req, res) => {
+  const { name, mobile, location, email, profession, photo, eventName } = req.body;
+
+  try {
+    // Generate the pass
+    const pass = await generatePass({ name, mobile, location, email, profession, photo, eventName });
+
+    // Send email with the pass
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: 'your-email@gmail.com',
+        pass: 'your-password',
+      },
+    });
+
+    await transporter.sendMail({
+      from: 'your-email@gmail.com',
+      to: email,
+      subject: `${eventName} - Your Event Pass`,
+      text: `Hello ${name},\n\nHere is your pass for ${eventName}.`,
+      attachments: [{ filename: 'event-pass.pdf', content: pass }],
+    });
+
+    // Send WhatsApp notification (using Twilio)
+    const client = Twilio('your-twilio-sid', 'your-twilio-auth-token');
+    await client.messages.create({
+      from: 'whatsapp:+14155238886',
+      to: `whatsapp:+${mobile}`,
+      body: `Hello ${name}, your pass for ${eventName} has been generated.`,
+    });
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Error generating pass' });
+  }
+});
+
+module.exports = router;
+
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+
+const generatePass = async ({ name, mobile, location, email, profession, photo, eventName }) => {
+  const doc = new PDFDocument();
+  const filePath = `./passes/${name.replace(/\s+/g, '_')}_pass.pdf`;
+
+  doc.pipe(fs.createWriteStream(filePath));
+
+  doc.fontSize(20).text(`${eventName} - Event Pass`, { align: 'center' });
+  doc.fontSize(16).text(`Name: ${name}`);
+  doc.text(`Mobile: ${mobile}`);
+  doc.text(`Location: ${location}`);
+  doc.text(`Email: ${email}`);
+  doc.text(`Profession: ${profession}`);
+  doc.image(photo, { fit: [100, 100], align: 'center' });
+
+  doc.end();
+
+  return fs.readFileSync(filePath);
+};
+
+module.exports = { generatePass };
